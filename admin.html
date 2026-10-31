@@ -36,7 +36,7 @@ button{width:100%;padding:13px;border:0;border-radius:14px;font-size:16px;font-w
 <main>
 <section id="lockSec"><h2>🔑 後台密碼</h2><div id="lockBody"></div>
 <p class="small">提醒：這是存在你這支手機／電腦上的簡易鎖，用來擋住隨手點開的人，不是銀行等級的帳號密碼。真正保密要靠：不要把這個連結公開貼出，不要把解鎖後的手機借給別人。</p>
-<p class="small">版本：2026-10-31 v1（大項／項次／日期／客戶／應收帳款清單＋詳細＋應收／已收／結案＋收款方式／日期／收款人）</p></section>
+<p class="small">版本：2026-10-31 v1.1（大項／項次／日期／客戶／應收帳款清單＋詳細＋應收／已收／結案＋收款方式／日期／收款人；日期顯示與月份篩選修正）</p></section>
 <div id="adminBody" style="display:none">
 <section>
 <h2>💰 應收總覽</h2>
@@ -65,13 +65,15 @@ const PINKEY="hongyi-admin-pin-v1";
 let allRows=[], openRow=null;
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function fmt(n){return "NT$ "+Number(n||0).toLocaleString("zh-Hant-TW")}
+function normDate(s){ const v=String(s||"").trim(); if(!v) return ""; const m=v.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/); if(m) return m[1]+"/"+m[2].padStart(2,"0")+"/"+m[3].padStart(2,"0"); const d=new Date(v); if(!isNaN(d)) return d.getFullYear()+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+String(d.getDate()).padStart(2,"0"); return v; }
+function inputDate(s){ const n=normDate(s); return n? n.replace(/\//g,"-") : ""; }
 function todayStr(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
 function badge(s){return s==="已收"?'<span class="badge paid">已收</span>':s==="結案"?'<span class="badge closed">結案</span>':'<span class="badge ar">應收</span>';}
 function filtered(){
   const q=($("qText").value||"").trim(), st=$("qStatus").value, mo=$("qMonth").value;
   return allRows.filter(r=>{
     if(st&&r.status!==st) return false;
-    if(mo&&!(String(r.date||"").startsWith(mo))) return false;
+    if(mo&&!(normDate(r.date).startsWith(mo.replace("-","/")))) return false;
     if(q&&!(r.client+r.quoteNo+r.major).includes(q)) return false;
     return true;
   });
@@ -86,9 +88,9 @@ function render(){
   $("list").innerHTML=list.length?list.map(r=>{
     const isOpen=openRow===r.row;
     return `<div class="item"><b>${esc(r.major)}</b> ・ 項次 ${esc(r.seq)} ${badge(r.status)}<br>
-    <span class="small">${esc(r.date)} ・ 客戶：${esc(r.client)} ・ 報價單 ${esc(r.quoteNo)}</span><br>
+    <span class="small">${esc(normDate(r.date))} ・ 客戶：${esc(r.client)} ・ 報價單 ${esc(r.quoteNo)}</span><br>
     <span class="num">${fmt(r.amount)}</span> <span class="small">（報價總額 ${fmt(r.total)}）</span>
-    ${r.status==="已收"?`<br><span class="small">✅ 收款：${esc(r.payMethod)}${r.payNote?`（${esc(r.payNote)}）`:""} ・ ${esc(r.payDate)} ・ 收款人 ${esc(r.payee)}</span>`:""}
+    ${r.status==="已收"?`<br><span class="small">✅ 收款：${esc(r.payMethod)}${r.payNote?`（${esc(r.payNote)}）`:""} ・ ${esc(normDate(r.payDate))} ・ 收款人 ${esc(r.payee)}</span>`:""}
     <div class="actions"><button class="ghost" onclick="toggleDetail(${r.row})">${isOpen?"收起詳細":"📄 詳細"}</button><button class="ghost" onclick="delRow(${r.row})">刪除這筆</button></div>
     ${isOpen?detailHtml(r):""}</div>`;
   }).join(""):"<p>這個查詢條件目前沒有紀錄。</p>";
@@ -96,7 +98,7 @@ function render(){
 function detailHtml(r){
   return `<div class="detail">
   <b>報價單詳細</b><br>
-  <span class="small">報價單號 ${esc(r.quoteNo)} ・ 大項 ${esc(r.major)} ・ 項次 ${esc(r.seq)} ・ 日期 ${esc(r.date)} ・ 客戶 ${esc(r.client)}</span><br>
+  <span class="small">報價單號 ${esc(r.quoteNo)} ・ 大項 ${esc(r.major)} ・ 項次 ${esc(r.seq)} ・ 日期 ${esc(normDate(r.date))} ・ 客戶 ${esc(r.client)}</span><br>
   <span class="desc">${esc(r.desc)}</span><br>
   單價 ${fmt(r.price)} × ${esc(r.qty)} ＝ <b>${fmt(r.amount)}</b>　報價總額 ${fmt(r.total)}<br><br>
   <label>狀態</label>
@@ -106,7 +108,7 @@ function detailHtml(r){
   <select id="pm-${r.row}"><option value="" ${!r.payMethod?"selected":""}>請選擇</option><option value="現金" ${r.payMethod==="現金"?"selected":""}>現金</option><option value="匯款" ${r.payMethod==="匯款"?"selected":""}>匯款</option><option value="其他" ${r.payMethod==="其他"?"selected":""}>其他</option></select>
   <label>其他方式說明（選「其他」時填，沒有就空著）</label>
   <input id="pn-${r.row}" type="text" value="${esc(r.payNote)}" placeholder="例如：支票、LINE Pay">
-  <div class="row"><div><label>收款日期</label><input id="pd-${r.row}" type="date" value="${esc(r.payDate||todayStr())}"></div>
+  <div class="row"><div><label>收款日期</label><input id="pd-${r.row}" type="date" value="${esc(inputDate(r.payDate)||todayStr())}"></div>
   <div><label>收款人</label><input id="pe-${r.row}" type="text" value="${esc(r.payee)}" placeholder="誰收的款"></div></div>
   </div>
   <p class="small" id="saveMsg-${r.row}"></p>
@@ -152,7 +154,7 @@ $("btnExport").onclick=()=>{
   const list=filtered();
   if(!list.length){alert("目前沒有可以匯出的紀錄。");return;}
   const rows=[["報價單號","大項","項次","日期","客戶","描述","單價","數量","應收帳款","報價總額","狀態","收款方式","收款日期","收款人","收款備註","來源檔名"]];
-  list.forEach(r=>rows.push([r.quoteNo,r.major,r.seq,r.date,r.client,r.desc,r.price,r.qty,r.amount,r.total,r.status,r.payMethod,r.payDate,r.payee,r.payNote,r.source]));
+  list.forEach(r=>rows.push([r.quoteNo,r.major,r.seq,normDate(r.date),r.client,r.desc,r.price,r.qty,r.amount,r.total,r.status,r.payMethod,normDate(r.payDate),r.payee,r.payNote,r.source]));
   const csv="\ufeff"+rows.map(x=>x.map(c=>`"${String(c??"").replace(/"/g,'""')}"`).join(",")).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
   a.download="宏逸科技應收帳款.csv";a.click();URL.revokeObjectURL(a.href);
