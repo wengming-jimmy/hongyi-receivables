@@ -47,7 +47,7 @@ button{width:100%;padding:13px;border:0;border-radius:14px;font-size:16px;font-w
 </section>
 <section>
 <h2>ℹ️ 這個程式怎麼認報價單</h2>
-<p class="small">系統找的是你報價單本來的格式：客戶名稱那一格、Date 那一格、NO 那一格（例如 Q202604071553），再找 Prod.# 那一列往下讀品項，讀到「小計／含稅總計」就停。品項的「大項」就是 Prod.# 那一欄（例如主機、螢幕、服務），後台清單就是用這個大項、項次、日期、客戶、應收帳款來列。<br><br>如果未來報價單格式改了（例如欄位位置移動），上傳前先跟我說一聲，我再調解析規則，不要硬上傳，免得金額對錯欄。</p>
+<p class="small">系統找的是你報價單本來的格式：客戶名稱那一格、Date 那一格、NO 那一格（例如 Q202604071553、Q202608281900），再找表頭那一列往下讀品項，讀到「小計／含稅總計」就停。舊格式表頭是 Prod.#／Description／AMOUNT，新格式表頭是 項目／規格描述／小計，兩種都認；小計、稅金中間有空白（例如「小　　計」）也認；金額用公式（例如單價乘數量、稅金乘 5%）也會讀公式算好的值。品項的「大項」就是表頭第一欄（舊格式 Prod.#，例如主機、螢幕、服務；新格式 項目，例如軟體），後台清單就是用這個大項、項次、日期、客戶、應收帳款來列。報價單正文表格（A 到 F 欄）以外的數字（例如右邊的草稿計算）不會算進應收。<br><br>如果未來報價單格式改了（例如欄位位置移動），上傳前先跟我說一聲，我再調解析規則，不要硬上傳，免得金額對錯欄。</p>
 </section>
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -66,6 +66,7 @@ function num(v){
 }
 function fmt(n){return "NT$ "+Number(n||0).toLocaleString("zh-Hant-TW")}
 function cell(aoa,r,c){ if(!aoa[r]||aoa[r][c]==null) return ""; return String(aoa[r][c]).trim(); }
+function norm(s){ return String(s==null?"":s).replace(/[\s\u3000]+/g,""); }
 function parseQuotation(aoa, fallbackNo){
   let client="", date="", quoteNo="", project="";
   let headerRow=-1;
@@ -90,18 +91,20 @@ function parseQuotation(aoa, fallbackNo){
       const m=joined.match(/Project\s*[:：]\s*(.*)/);
       if(m&&m[1].trim()) project=m[1].trim();
     }
-    if(headerRow<0 && (joined.includes("Prod")||joined.includes("Description")) && (joined.includes("AMOUNT")||joined.includes("單價"))){
+    const rowNorm=(aoa[r]||[]).map(v=>norm(v)).join(" ");
+    if(headerRow<0 && (rowNorm.includes("項目")||rowNorm.includes("Prod")||rowNorm.includes("Description")||rowNorm.includes("規格描述")) && rowNorm.includes("單價") && (rowNorm.includes("AMOUNT")||rowNorm.includes("小計"))){
       headerRow=r;
     }
   }
   if(!quoteNo) quoteNo=fallbackNo;
-  if(headerRow<0) throw new Error("找不到 Prod.# / Description 表頭列，請確認這是宏逸科技報價單格式。");
-  const items=[]; let total=0; let foundTotal=false;
+  if(headerRow<0) throw new Error("找不到表頭列（舊格式 Prod.# / Description / AMOUNT，或新格式 項目 / 規格描述 / 小計），請確認這是宏逸科技報價單格式。");
+  const items=[]; let total=0; let foundTotal=false; let subtotal=0; let tax=0;
   for(let r=headerRow+1;r<aoa.length;r++){
     const b=cell(aoa,r,1), e=cell(aoa,r,4), f=cell(aoa,r,5);
-    const joinedRow=[cell(aoa,r,1),cell(aoa,r,2),cell(aoa,r,4),cell(aoa,r,5)].join(" ");
+    const joinedRow=norm([cell(aoa,r,1),cell(aoa,r,2),cell(aoa,r,4),cell(aoa,r,5)].join(" "));
     if(joinedRow.includes("含稅總計")){ if(num(f)) { total=num(f); foundTotal=true; } break; }
-    if(joinedRow.includes("小計")||joinedRow.includes("稅金")){ continue; }
+    if(joinedRow.includes("小計")){ if(num(f)) subtotal=num(f); continue; }
+    if(joinedRow.includes("稅金")){ if(num(f)) tax=num(f); continue; }
     if(b.startsWith("Project")) continue;
     const major=b, desc=cell(aoa,r,2), price=num(cell(aoa,r,3)), qty=num(cell(aoa,r,4)), amount=num(f)||(price*qty);
     if(!major && !desc) continue;
@@ -111,7 +114,9 @@ function parseQuotation(aoa, fallbackNo){
   if(!items.length) throw new Error("表頭下面沒有讀到品項，請確認品項列沒有被合併儲存格蓋掉。");
   if(!foundTotal) total=items.reduce((s,x)=>s+x.amount,0);
   items.forEach((x,i)=>{ x.seq=i+1; x.quoteNo=quoteNo; x.date=date; x.client=client; x.total=total; x.source=fileName; });
-  return { quoteNo: quoteNo, date: date, client: client, project: project, total: total, items: items };
+  if(!subtotal) subtotal=items.reduce((s,x)=>s+x.amount,0);
+  if(!tax && foundTotal && total>subtotal) tax=total-subtotal;
+  return { quoteNo: quoteNo, date: date, client: client, project: project, total: total, subtotal: subtotal, tax: tax, items: items };
 }
 $("file").addEventListener("change", async ev=>{
   const f=ev.target.files[0]; if(!f) return;
@@ -124,7 +129,9 @@ $("file").addEventListener("change", async ev=>{
     const aoa=XLSX.utils.sheet_to_json(ws, { header:1, defval:"" });
     const fallback=fileName.replace(/\.(xls|xlsx|csv)$/i,"");
     parsed=parseQuotation(aoa, fallback);
-    $("summary").innerHTML=`<p class="lead">報價單號：<b>${esc(parsed.quoteNo)}</b><br>日期：<b>${esc(parsed.date||"（未讀到）")}</b>　客戶：<b>${esc(parsed.client||"（未讀到）")}</b><br>品項：<b>${parsed.items.length} 筆</b>　含稅總計：<span class="num">${fmt(parsed.total)}</span><br>加總檢查：品項金額合計 ${fmt(parsed.items.reduce((s,x)=>s+x.amount,0))}，跟含稅總計${parsed.items.reduce((s,x)=>s+x.amount,0)===parsed.total?"一致 ✅":"不一致 ⚠️（請檢查再寫入）"}</p>`;
+    const sumAmt=parsed.items.reduce((s,x)=>s+x.amount,0);
+    const checkTxt=parsed.tax>0 ? (sumAmt+parsed.tax===parsed.total ? `小計 ${fmt(parsed.subtotal)} ＋ 稅金 ${fmt(parsed.tax)} ＝ 含稅總計 ${fmt(parsed.total)}，一致 ✅` : `小計 ${fmt(parsed.subtotal)} ＋ 稅金 ${fmt(parsed.tax)} ≠ 含稅總計 ${fmt(parsed.total)} ⚠️（請檢查再寫入）`) : (sumAmt===parsed.total ? `品項金額合計 ${fmt(sumAmt)}，跟含稅總計一致 ✅` : `品項金額合計 ${fmt(sumAmt)}，跟含稅總計 ${fmt(parsed.total)} 不一致 ⚠️（請檢查再寫入）`);
+    $("summary").innerHTML=`<p class="lead">報價單號：<b>${esc(parsed.quoteNo)}</b><br>日期：<b>${esc(parsed.date||"（未讀到）")}</b>　客戶：<b>${esc(parsed.client||"（未讀到）")}</b><br>品項：<b>${parsed.items.length} 筆</b>${parsed.tax>0?`　小計 ${fmt(parsed.subtotal)}　稅金 ${fmt(parsed.tax)}`:""}　含稅總計：<span class="num">${fmt(parsed.total)}</span><br>加總檢查：${checkTxt}<br><span class="small">後台每一筆的應收帳款是品項小計（例如這張是 ${fmt(parsed.items[0]?parsed.items[0].amount:0)} 起算），報價總額欄是含稅總計；如果含稅總計才是你要收的總額，請在寫入前跟我說，我再幫你調整。</span></p>`;
     $("preview").innerHTML=parsed.items.map(x=>`<div class="item"><b>${esc(x.major)}</b> ・ 項次 ${x.seq} ・ ${esc(x.date)} ・ ${esc(x.client)}<br><span class="num">${fmt(x.amount)}</span> <span class="small">（單價 ${fmt(x.price)} × ${x.qty}）</span><br><span class="desc">${esc(x.desc)}</span></div>`).join("");
     $("previewSec").style.display="block";
     if(!parsed.client||!parsed.date) $("msg").innerHTML=`<p class="warn">⚠️ 客戶或日期有欄位沒讀到，寫入前請確認上面顯示的是否正確；如果不正確，請不要寫入，先把檔案傳給我調解析規則。</p>`;
