@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>報價單上傳｜宏逸科技資訊 應收帳款</title>
+<meta name="robots" content="noindex">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:"PingFang TC","Microsoft JhengHei",system-ui,sans-serif;background:#eef2f7;color:#1e293b}
+header{background:#1e3a8a;color:#fff;padding:22px 18px;text-align:center}
+header h1{margin:0;font-size:24px} header p{margin:8px 0 0;color:#dbeafe;line-height:1.6}
+main{max-width:760px;margin:0 auto;padding:16px 14px 48px}
+section{background:#fff;border-radius:18px;padding:20px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+h2{font-size:20px;margin:0 0 6px} p.lead{color:#475569;line-height:1.65;margin:0 0 12px}
+label{display:block;font-weight:800;margin:14px 0 6px}
+input[type=file]{width:100%;padding:12px;border:2px dashed #93c5fd;border-radius:12px;background:#eff6ff;font-size:16px}
+button{width:100%;padding:13px;border:0;border-radius:14px;font-size:16px;font-weight:900;cursor:pointer}
+.primary{background:#1e3a8a;color:#fff;margin-top:12px} .ghost{background:#e0e7ff;color:#1e3a8a;margin-top:10px}
+.small{font-size:14px;color:#64748b;line-height:1.65}
+.item{border-top:1px solid #e2e8f0;padding:14px 0;line-height:1.65}
+.item b{font-size:17px}
+.num{font-size:18px;font-weight:900;color:#1e3a8a}
+.desc{white-space:pre-wrap;color:#334155;font-size:15px}
+.warn{background:#fef3c7;border-radius:12px;padding:12px;line-height:1.65}
+.ok{background:#dcfce7;border-radius:12px;padding:12px;line-height:1.65}
+</style>
+</head>
+<body>
+<header><h1>📄 報價單上傳｜宏逸科技資訊</h1><p>選一份報價單 Excel（.xls / .xlsx 都可以），<br>系統會逐筆讀出品項，確認後才寫入應收帳款資料庫。</p></header>
+<main>
+<section>
+<h2>1️⃣ 選擇報價單檔案</h2>
+<p class="lead">這個上傳頁是內部用的，連結請不要公開貼出。後台清單在另外一個連結，這一頁看不到舊資料。</p>
+<label for="file">報價單 Excel 檔案</label>
+<input id="file" type="file" accept=".xls,.xlsx,.csv">
+<p class="small">上傳後會先顯示解析結果讓你檢查，沒按「確認寫入」之前不會寫進資料庫。同一張報價單號重複上傳時，系統會先提醒，不會直接重複寫入。</p>
+<div id="msg"></div>
+</section>
+<section id="previewSec" style="display:none">
+<h2>2️⃣ 解析結果，請先檢查</h2>
+<div id="summary"></div>
+<div id="preview"></div>
+<button class="primary" id="btnImport">✅ 確認無誤，寫入應收帳款</button>
+<button class="ghost" id="btnClear">🔄 換一個檔案重來</button>
+<p class="small">寫入後每一項的狀態都預設是「應收」，要改成「已收」或「結案」請到後台點那一筆的詳細來改。</p>
+</section>
+<section>
+<h2>ℹ️ 這個程式怎麼認報價單</h2>
+<p class="small">系統找的是你報價單本來的格式：客戶名稱那一格、Date 那一格、NO 那一格（例如 Q202604071553），再找 Prod.# 那一列往下讀品項，讀到「小計／含稅總計」就停。品項的「大項」就是 Prod.# 那一欄（例如主機、螢幕、服務），後台清單就是用這個大項、項次、日期、客戶、應收帳款來列。<br><br>如果未來報價單格式改了（例如欄位位置移動），上傳前先跟我說一聲，我再調解析規則，不要硬上傳，免得金額對錯欄。</p>
+</section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="config.js?v=20261031"></script>
+<script>
+const $=id=>document.getElementById(id);
+const API=(typeof HONGYI_API!=="undefined"&&HONGYI_API.url)?HONGYI_API.url:"";
+const TOKEN=(typeof HONGYI_API!=="undefined"&&HONGYI_API.token)?HONGYI_API.token:"";
+let parsed=null, fileName="";
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function num(v){
+  if(v==null||v==="") return 0;
+  if(typeof v==="number") return v;
+  const n=Number(String(v).replace(/[,，\sNT\$元]/g,""));
+  return isNaN(n)?0:n;
+}
+function fmt(n){return "NT$ "+Number(n||0).toLocaleString("zh-Hant-TW")}
+function cell(aoa,r,c){ if(!aoa[r]||aoa[r][c]==null) return ""; return String(aoa[r][c]).trim(); }
+function parseQuotation(aoa, fallbackNo){
+  let client="", date="", quoteNo="", project="";
+  let headerRow=-1;
+  for(let r=0;r<aoa.length;r++){
+    const joined=(aoa[r]||[]).map(v=>String(v==null?"":v)).join(" ");
+    if(!client){
+      for(let c=0;c<(aoa[r]||[]).length;c++){
+        if(cell(aoa,r,c).includes("客戶名稱")){
+          for(let k=c+1;k<(aoa[r]||[]).length;k++){ if(cell(aoa,r,k)){ client=cell(aoa,r,k); break; } }
+        }
+      }
+    }
+    if(!date){
+      const m=joined.match(/Date\s*[:：]\s*(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/);
+      if(m) date=m[1].replace(/-/g,"/");
+    }
+    if(!quoteNo){
+      const m=joined.match(/NO\s*[:：]\s*([A-Za-z0-9\-]+)/);
+      if(m) quoteNo=m[1];
+    }
+    if(!project){
+      const m=joined.match(/Project\s*[:：]\s*(.*)/);
+      if(m&&m[1].trim()) project=m[1].trim();
+    }
+    if(headerRow<0 && (joined.includes("Prod")||joined.includes("Description")) && (joined.includes("AMOUNT")||joined.includes("單價"))){
+      headerRow=r;
+    }
+  }
+  if(!quoteNo) quoteNo=fallbackNo;
+  if(headerRow<0) throw new Error("找不到 Prod.# / Description 表頭列，請確認這是宏逸科技報價單格式。");
+  const items=[]; let total=0; let foundTotal=false;
+  for(let r=headerRow+1;r<aoa.length;r++){
+    const b=cell(aoa,r,1), e=cell(aoa,r,4), f=cell(aoa,r,5);
+    const joinedRow=[cell(aoa,r,1),cell(aoa,r,2),cell(aoa,r,4),cell(aoa,r,5)].join(" ");
+    if(joinedRow.includes("含稅總計")){ if(num(f)) { total=num(f); foundTotal=true; } break; }
+    if(joinedRow.includes("小計")||joinedRow.includes("稅金")){ continue; }
+    if(b.startsWith("Project")) continue;
+    const major=b, desc=cell(aoa,r,2), price=num(cell(aoa,r,3)), qty=num(cell(aoa,r,4)), amount=num(f)||(price*qty);
+    if(!major && !desc) continue;
+    if(!major && !amount) continue;
+    items.push({ major: major, desc: desc, price: price, qty: qty||1, amount: amount });
+  }
+  if(!items.length) throw new Error("表頭下面沒有讀到品項，請確認品項列沒有被合併儲存格蓋掉。");
+  if(!foundTotal) total=items.reduce((s,x)=>s+x.amount,0);
+  items.forEach((x,i)=>{ x.seq=i+1; x.quoteNo=quoteNo; x.date=date; x.client=client; x.total=total; x.source=fileName; });
+  return { quoteNo: quoteNo, date: date, client: client, project: project, total: total, items: items };
+}
+$("file").addEventListener("change", async ev=>{
+  const f=ev.target.files[0]; if(!f) return;
+  fileName=f.name;
+  $("msg").innerHTML="";
+  try{
+    const buf=await f.arrayBuffer();
+    const wb=XLSX.read(buf, { type:"array" });
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const aoa=XLSX.utils.sheet_to_json(ws, { header:1, defval:"" });
+    const fallback=fileName.replace(/\.(xls|xlsx|csv)$/i,"");
+    parsed=parseQuotation(aoa, fallback);
+    $("summary").innerHTML=`<p class="lead">報價單號：<b>${esc(parsed.quoteNo)}</b><br>日期：<b>${esc(parsed.date||"（未讀到）")}</b>　客戶：<b>${esc(parsed.client||"（未讀到）")}</b><br>品項：<b>${parsed.items.length} 筆</b>　含稅總計：<span class="num">${fmt(parsed.total)}</span><br>加總檢查：品項金額合計 ${fmt(parsed.items.reduce((s,x)=>s+x.amount,0))}，跟含稅總計${parsed.items.reduce((s,x)=>s+x.amount,0)===parsed.total?"一致 ✅":"不一致 ⚠️（請檢查再寫入）"}</p>`;
+    $("preview").innerHTML=parsed.items.map(x=>`<div class="item"><b>${esc(x.major)}</b> ・ 項次 ${x.seq} ・ ${esc(x.date)} ・ ${esc(x.client)}<br><span class="num">${fmt(x.amount)}</span> <span class="small">（單價 ${fmt(x.price)} × ${x.qty}）</span><br><span class="desc">${esc(x.desc)}</span></div>`).join("");
+    $("previewSec").style.display="block";
+    if(!parsed.client||!parsed.date) $("msg").innerHTML=`<p class="warn">⚠️ 客戶或日期有欄位沒讀到，寫入前請確認上面顯示的是否正確；如果不正確，請不要寫入，先把檔案傳給我調解析規則。</p>`;
+  }catch(err){
+    parsed=null; $("previewSec").style.display="none";
+    $("msg").innerHTML=`<p class="warn">❌ 解析失敗：${esc(err.message||err)}<br>請確認這是宏逸科技報價單 Excel，不要上傳其他格式的表。</p>`;
+  }
+});
+$("btnClear").onclick=()=>{ $("file").value=""; parsed=null; $("previewSec").style.display="none"; $("msg").innerHTML=""; };
+$("btnImport").onclick=async ()=>{
+  if(!parsed) return;
+  if(!API){ $("msg").innerHTML=`<p class="warn">⚠️ 資料庫還沒接上（config.js 裡沒有 API 網址），解析結果是正確的，但現在還不能寫入。等部署完成後再按一次寫入。</p>`; return; }
+  $("msg").innerHTML=`<p class="small">正在寫入 ${parsed.items.length} 筆…</p>`;
+  const doImport=async (replace)=>{
+    const res=await fetch(API, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, body: JSON.stringify({ token: TOKEN, action:"import", replace: !!replace, rows: parsed.items }) });
+    return res.json();
+  };
+  try{
+    let j=await doImport(false);
+    if(j.exists){
+      if(!confirm(`報價單 ${j.quoteNo} 已經有 ${j.count} 筆在資料庫裡了。\n\n按「確定」會先刪掉舊的 ${j.count} 筆、再寫入這次的 ${parsed.items.length} 筆（覆蓋）。\n按「取消」就不寫入，避免重複。`)) { $("msg").innerHTML=`<p class="small">已取消寫入，資料庫沒有變動。</p>`; return; }
+      j=await doImport(true);
+    }
+    if(!j.ok) throw new Error(j.error||"寫入失敗");
+    $("msg").innerHTML=`<p class="ok">✅ 已寫入 ${j.inserted} 筆（報價單 ${esc(parsed.quoteNo)}，${j.replaced?`已覆蓋舊的 ${j.replaced} 筆，`:""}合計 ${fmt(parsed.total)}），狀態都是「應收」。請到後台查看。</p>`;
+  }catch(err){
+    $("msg").innerHTML=`<p class="warn">❌ 寫入失敗：${esc(err.message||err)}。請直接打開試算表確認有沒有寫進去，避免重複按寫入。</p>`;
+  }
+};
+</script>
+</body>
+</html>

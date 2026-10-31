@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>後台｜宏逸科技資訊 應收帳款</title>
+<meta name="robots" content="noindex">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:"PingFang TC","Microsoft JhengHei",system-ui,sans-serif;background:#eef2f7;color:#1e293b}
+header{background:#1e3a8a;color:#fff;padding:22px 18px;text-align:center}
+header h1{margin:0;font-size:24px} header p{margin:8px 0 0;color:#dbeafe;line-height:1.6}
+main{max-width:760px;margin:0 auto;padding:16px 14px 48px}
+section{background:#fff;border-radius:18px;padding:20px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+h2{font-size:20px;margin:0 0 6px} p.lead{color:#475569;line-height:1.65;margin:0 0 12px}
+label{display:block;font-weight:800;margin:14px 0 6px}
+input[type=text],input[type=date],input[type=password],select{width:100%;padding:13px;border:2px solid #cbd5e1;border-radius:12px;font-size:16px;background:#fff}
+button{width:100%;padding:13px;border:0;border-radius:14px;font-size:16px;font-weight:900;cursor:pointer}
+.primary{background:#1e3a8a;color:#fff;margin-top:12px} .ghost{background:#e0e7ff;color:#1e3a8a;margin-top:10px} .danger{background:#fff0f0;color:#b00000;margin-top:10px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.small{font-size:14px;color:#64748b;line-height:1.65}
+.item{border-top:1px solid #e2e8f0;padding:14px 0;line-height:1.65}
+.badge{display:inline-block;border-radius:999px;padding:3px 10px;font-size:14px;font-weight:800}
+.ar{background:#fef3c7;color:#92400e} .paid{background:#dcfce7;color:#166534} .closed{background:#e2e8f0;color:#334155}
+.actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.actions button{margin:0;padding:9px;font-size:14px;width:auto;flex:1}
+.detail{background:#f8fafc;border-radius:12px;padding:14px;margin-top:10px;line-height:1.7}
+.desc{white-space:pre-wrap;color:#334155;font-size:15px}
+.num{font-size:18px;font-weight:900;color:#1e3a8a}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center}
+.stat{background:#f8fafc;border-radius:12px;padding:12px}.stat b{display:block;font-size:18px;color:#1e3a8a}
+@media(max-width:520px){.row{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header><h1>🔒 後台｜宏逸科技資訊 應收帳款</h1><p>這個後台連結請不要公開貼出。<br>上傳頁沒有名單，只有這裡看得到全部應收明細。</p></header>
+<main>
+<section id="lockSec"><h2>🔑 後台密碼</h2><div id="lockBody"></div>
+<p class="small">提醒：這是存在你這支手機／電腦上的簡易鎖，用來擋住隨手點開的人，不是銀行等級的帳號密碼。真正保密要靠：不要把這個連結公開貼出，不要把解鎖後的手機借給別人。</p>
+<p class="small">版本：2026-10-31 v1（大項／項次／日期／客戶／應收帳款清單＋詳細＋應收／已收／結案＋收款方式／日期／收款人）</p></section>
+<div id="adminBody" style="display:none">
+<section>
+<h2>💰 應收總覽</h2>
+<div class="stats"><div class="stat">應收未收<b id="sumAR">—</b></div><div class="stat">已收<b id="sumPaid">—</b></div><div class="stat">結案<b id="sumClosed">—</b></div></div>
+<p class="small" id="dbNote">正在準備載入…</p>
+<p class="small" id="count"></p>
+<label for="qText">🔍 關鍵字（客戶／報價單號／大項）</label>
+<input id="qText" type="text" placeholder="例如：卓廣珣、Q2026、主機（可不填）">
+<div class="row"><div><label for="qStatus">狀態篩選</label><select id="qStatus"><option value="">全部狀態</option><option value="應收">應收</option><option value="已收">已收</option><option value="結案">結案</option></select></div>
+<div><label for="qMonth">月份篩選</label><input id="qMonth" type="month"></div></div>
+<button class="primary" id="btnAll">看全部</button>
+<button class="ghost" id="btnReload">🔄 從資料庫重新載入</button>
+<button class="ghost" id="btnExport">⬇️ 匯出目前看到的結果 CSV</button>
+<button class="ghost" id="lockBtn">🔒 鎖定後台</button>
+<button class="ghost" id="changePinBtn">🔑 換一個後台密碼</button>
+</section>
+<section><h2>📋 明細（點「詳細」才會看到報價單內容）</h2><div id="list"></div></section>
+</div>
+</main>
+<script src="config.js?v=20261031"></script>
+<script>
+const $=id=>document.getElementById(id);
+const API=(typeof HONGYI_API!=="undefined"&&HONGYI_API.url)?HONGYI_API.url:"";
+const TOKEN=(typeof HONGYI_API!=="undefined"&&HONGYI_API.token)?HONGYI_API.token:"";
+const PINKEY="hongyi-admin-pin-v1";
+let allRows=[], openRow=null;
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function fmt(n){return "NT$ "+Number(n||0).toLocaleString("zh-Hant-TW")}
+function todayStr(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function badge(s){return s==="已收"?'<span class="badge paid">已收</span>':s==="結案"?'<span class="badge closed">結案</span>':'<span class="badge ar">應收</span>';}
+function filtered(){
+  const q=($("qText").value||"").trim(), st=$("qStatus").value, mo=$("qMonth").value;
+  return allRows.filter(r=>{
+    if(st&&r.status!==st) return false;
+    if(mo&&!(String(r.date||"").startsWith(mo))) return false;
+    if(q&&!(r.client+r.quoteNo+r.major).includes(q)) return false;
+    return true;
+  });
+}
+function render(){
+  const list=filtered();
+  const sum=s=>list.reduce((a,r)=>a+(r.status===s?Number(r.amount||0):0),0);
+  // 總覽用全部資料算，不是只算篩選後，避免篩選後總額被誤會
+  const sumAll=s=>allRows.reduce((a,r)=>a+(r.status===s?Number(r.amount||0):0),0);
+  $("sumAR").textContent=fmt(sumAll("應收")); $("sumPaid").textContent=fmt(sumAll("已收")); $("sumClosed").textContent=fmt(sumAll("結案"));
+  $("count").textContent=`全部 ${allRows.length} 筆，目前看到 ${list.length} 筆。總覽金額是全部資料的合計。`;
+  $("list").innerHTML=list.length?list.map(r=>{
+    const isOpen=openRow===r.row;
+    return `<div class="item"><b>${esc(r.major)}</b> ・ 項次 ${esc(r.seq)} ${badge(r.status)}<br>
+    <span class="small">${esc(r.date)} ・ 客戶：${esc(r.client)} ・ 報價單 ${esc(r.quoteNo)}</span><br>
+    <span class="num">${fmt(r.amount)}</span> <span class="small">（報價總額 ${fmt(r.total)}）</span>
+    ${r.status==="已收"?`<br><span class="small">✅ 收款：${esc(r.payMethod)}${r.payNote?`（${esc(r.payNote)}）`:""} ・ ${esc(r.payDate)} ・ 收款人 ${esc(r.payee)}</span>`:""}
+    <div class="actions"><button class="ghost" onclick="toggleDetail(${r.row})">${isOpen?"收起詳細":"📄 詳細"}</button><button class="ghost" onclick="delRow(${r.row})">刪除這筆</button></div>
+    ${isOpen?detailHtml(r):""}</div>`;
+  }).join(""):"<p>這個查詢條件目前沒有紀錄。</p>";
+}
+function detailHtml(r){
+  return `<div class="detail">
+  <b>報價單詳細</b><br>
+  <span class="small">報價單號 ${esc(r.quoteNo)} ・ 大項 ${esc(r.major)} ・ 項次 ${esc(r.seq)} ・ 日期 ${esc(r.date)} ・ 客戶 ${esc(r.client)}</span><br>
+  <span class="desc">${esc(r.desc)}</span><br>
+  單價 ${fmt(r.price)} × ${esc(r.qty)} ＝ <b>${fmt(r.amount)}</b>　報價總額 ${fmt(r.total)}<br><br>
+  <label>狀態</label>
+  <select id="st-${r.row}" onchange="document.getElementById('pay-${r.row}').style.display=this.value==='已收'?'block':'none'"><option value="應收" ${r.status==="應收"?"selected":""}>應收</option><option value="已收" ${r.status==="已收"?"selected":""}>已收</option><option value="結案" ${r.status==="結案"?"selected":""}>結案</option></select>
+  <div id="pay-${r.row}" style="display:${r.status==="已收"?"block":"none"}">
+  <label>收款方式</label>
+  <select id="pm-${r.row}"><option value="" ${!r.payMethod?"selected":""}>請選擇</option><option value="現金" ${r.payMethod==="現金"?"selected":""}>現金</option><option value="匯款" ${r.payMethod==="匯款"?"selected":""}>匯款</option><option value="其他" ${r.payMethod==="其他"?"selected":""}>其他</option></select>
+  <label>其他方式說明（選「其他」時填，沒有就空著）</label>
+  <input id="pn-${r.row}" type="text" value="${esc(r.payNote)}" placeholder="例如：支票、LINE Pay">
+  <div class="row"><div><label>收款日期</label><input id="pd-${r.row}" type="date" value="${esc(r.payDate||todayStr())}"></div>
+  <div><label>收款人</label><input id="pe-${r.row}" type="text" value="${esc(r.payee)}" placeholder="誰收的款"></div></div>
+  </div>
+  <p class="small" id="saveMsg-${r.row}"></p>
+  <button class="primary" onclick="saveStatus(${r.row})">💾 儲存這一筆的狀態</button>
+  <button class="ghost" onclick="saveStatusQuote('${esc(r.quoteNo)}',${r.row})">💾 整張報價單（${esc(r.quoteNo)}）一起改成上面狀態</button>
+  <button class="danger" onclick="delQuote('${esc(r.quoteNo)}')">🗑️ 刪除整張報價單（${esc(r.quoteNo)} 全部品項）</button>
+  <p class="small">提醒：改回「應收」會清空收款方式／日期／收款人；改成「結案」會保留已填的收款資料。整張一起改時，收款資料會套用到同一張報價單的每一筆。</p>
+  </div>`;
+}
+window.toggleDetail=row=>{ openRow=(openRow===row?null:row); render(); };
+window.delRow=row=>{ if(!confirm("確定要從資料庫刪除這筆嗎？刪除後無法復原，建議先匯出備份。"))return;
+  fetch(API+"?action=delete&token="+encodeURIComponent(TOKEN)+"&row="+row).then(()=>{allRows=allRows.filter(x=>x.row!==row); if(openRow===row) openRow=null; render();}).catch(()=>alert("刪除失敗，請直接到試算表刪除該列。")); };
+window.delQuote=q=>{ if(!confirm(`確定要刪除整張報價單 ${q} 的全部品項嗎？刪除後無法復原，建議先匯出備份。`))return;
+  fetch(API+"?action=deleteQuote&token="+encodeURIComponent(TOKEN)+"&quoteNo="+encodeURIComponent(q)).then(()=>{allRows=allRows.filter(x=>x.quoteNo!==q); openRow=null; render();}).catch(()=>alert("刪除失敗，請直接到試算表刪除。")); };
+function collectPay(row){
+  const st=$("st-"+row).value;
+  if(st!=="已收") return { status: st, payMethod:"", payDate:"", payee:"", payNote:"" };
+  const pm=$("pm-"+row).value;
+  if(!pm){ alert("狀態選「已收」時，一定要選收款方式（現金／匯款／其他）。"); return null; }
+  return { status: st, payMethod: pm, payDate: $("pd-"+row).value||todayStr(), payee: $("pe-"+row).value.trim(), payNote: $("pn-"+row).value.trim() };
+}
+window.saveStatus=row=>{
+  const p=collectPay(row); if(!p) return;
+  const q=`action=setStatus&token=${encodeURIComponent(TOKEN)}&row=${row}&status=${encodeURIComponent(p.status)}&payMethod=${encodeURIComponent(p.payMethod)}&payDate=${encodeURIComponent(p.payDate)}&payee=${encodeURIComponent(p.payee)}&payNote=${encodeURIComponent(p.payNote)}`;
+  fetch(API+"?"+q).then(r=>r.json()).then(j=>{ if(!j.ok) throw 0;
+    const r=allRows.find(x=>x.row===row); if(r){ r.status=p.status; r.payMethod=p.payMethod; r.payDate=p.payDate; r.payee=p.payee; r.payNote=p.payNote; }
+    $("saveMsg-"+row).textContent="✅ 已儲存。"; render(); })
+  .catch(()=>{ $("saveMsg-"+row).textContent="❌ 儲存失敗，請直接到試算表改該列的狀態欄。"; });
+};
+window.saveStatusQuote=(q,row)=>{
+  const p=collectPay(row); if(!p) return;
+  if(!confirm(`確定要把報價單 ${q} 的全部品項都改成「${p.status}」嗎？`)) return;
+  const qs=`action=setStatusQuote&token=${encodeURIComponent(TOKEN)}&quoteNo=${encodeURIComponent(q)}&status=${encodeURIComponent(p.status)}&payMethod=${encodeURIComponent(p.payMethod)}&payDate=${encodeURIComponent(p.payDate)}&payee=${encodeURIComponent(p.payee)}&payNote=${encodeURIComponent(p.payNote)}`;
+  fetch(API+"?"+qs).then(r=>r.json()).then(j=>{ if(!j.ok) throw 0;
+    allRows.forEach(x=>{ if(x.quoteNo===q){ x.status=p.status; x.payMethod=p.payMethod; x.payDate=p.payDate; x.payee=p.payee; x.payNote=p.payNote; } });
+    $("saveMsg-"+row).textContent=`✅ 整張報價單已改成「${p.status}」（${j.updated} 筆）。`; render(); })
+  .catch(()=>{ $("saveMsg-"+row).textContent="❌ 儲存失敗，請直接到試算表改。"; });
+};
+$("btnAll").onclick=()=>{ $("qText").value=""; $("qStatus").value=""; $("qMonth").value=""; render(); };
+$("qText").addEventListener("input",render); $("qStatus").addEventListener("change",render); $("qMonth").addEventListener("change",render);
+$("btnReload").onclick=loadDb;
+$("btnExport").onclick=()=>{
+  const list=filtered();
+  if(!list.length){alert("目前沒有可以匯出的紀錄。");return;}
+  const rows=[["報價單號","大項","項次","日期","客戶","描述","單價","數量","應收帳款","報價總額","狀態","收款方式","收款日期","收款人","收款備註","來源檔名"]];
+  list.forEach(r=>rows.push([r.quoteNo,r.major,r.seq,r.date,r.client,r.desc,r.price,r.qty,r.amount,r.total,r.status,r.payMethod,r.payDate,r.payee,r.payNote,r.source]));
+  const csv="\ufeff"+rows.map(x=>x.map(c=>`"${String(c??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  a.download="宏逸科技應收帳款.csv";a.click();URL.revokeObjectURL(a.href);
+};
+function loadDb(){
+  if(!API){$("dbNote").textContent="設定檔還沒填資料庫網址：請等部署完成、config.js 更新後，關掉分頁重開後台一次。";return;}
+  $("dbNote").textContent="正在從資料庫載入…";
+  fetch(API+"?action=list&token="+encodeURIComponent(TOKEN)).then(r=>r.json()).then(j=>{if(!j.ok)throw 0;allRows=j.rows;$("dbNote").textContent="✅ 已載入 "+allRows.length+" 筆。";render();})
+  .catch(()=>{$("dbNote").textContent="⚠️ 載入失敗（可能是試算表尚未部署或網路問題），請直接打開試算表確認，裡面的資料就是後台資料。";});
+}
+function unlock(){sessionStorage.setItem("hongyi-admin-unlocked","1");$("lockSec").style.display="none";$("adminBody").style.display="block";loadDb();}
+function showLock(){
+  const pin=localStorage.getItem(PINKEY);
+  if(!pin){$("lockBody").innerHTML=`<p class="lead">第一次開後台，請先設一個你記得住的後台密碼。</p><label>設定後台密碼</label><input id="newPin" type="password" placeholder="至少 4 個字"><button class="primary" id="setPinBtn">設定並進入後台</button>`;
+    $("setPinBtn").onclick=()=>{const v=$("newPin").value.trim();if(v.length<4){alert("密碼至少 4 個字。");return;}localStorage.setItem(PINKEY,v);unlock();};}
+  else{$("lockBody").innerHTML=`<label>請輸入後台密碼</label><input id="pinIn" type="password" placeholder="輸入後台密碼"><button class="primary" id="unlockBtn">進入後台</button><button class="ghost" id="forgetBtn">忘記密碼（只清除密碼鎖，名單不會刪）</button>`;
+    $("unlockBtn").onclick=()=>{if($("pinIn").value===pin)unlock();else alert("密碼不對，請再試一次。");};
+    $("forgetBtn").onclick=()=>{if(confirm("確定要清除後台密碼鎖嗎？紀錄不會被刪除，下次開後台會請你重新設定密碼。")){localStorage.removeItem(PINKEY);location.reload();}};}
+}
+$("lockBtn").onclick=()=>{sessionStorage.removeItem("hongyi-admin-unlocked");location.reload();};
+$("changePinBtn").onclick=()=>{const v=prompt("請輸入新的後台密碼（至少 4 個字）：");if(v&&v.trim().length>=4){localStorage.setItem(PINKEY,v.trim());alert("後台密碼已更換。");}else if(v!==null){alert("密碼至少 4 個字，沒有更換。");}};
+if(sessionStorage.getItem("hongyi-admin-unlocked")==="1")unlock();else showLock();
+</script>
+</body>
+</html>
