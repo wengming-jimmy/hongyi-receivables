@@ -25,35 +25,36 @@ button{width:100%;padding:13px;border:0;border-radius:14px;font-size:16px;font-w
 .actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.actions button{margin:0;padding:9px;font-size:14px;width:auto;flex:1}
 .detail{background:#f8fafc;border-radius:12px;padding:14px;margin-top:10px;line-height:1.7}
 .desc{white-space:pre-wrap;color:#334155;font-size:15px}
-.num{font-size:18px;font-weight:900;color:#1e3a8a}
+.num{font-size:20px;font-weight:900;color:#1e3a8a}
 .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center}
 .stat{background:#f8fafc;border-radius:12px;padding:12px}.stat b{display:block;font-size:18px;color:#1e3a8a}
+.qitem{border-top:1px dashed #cbd5e1;padding:10px 0}
 @media(max-width:520px){.row{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
-<header><h1>🔒 後台｜宏逸科技資訊 應收帳款</h1><p>這個後台連結請不要公開貼出。<br>上傳頁沒有名單，只有這裡看得到全部應收明細。</p></header>
+<header><h1>🔒 後台｜宏逸科技資訊 應收帳款</h1><p>這個後台連結請不要公開貼出。<br>上傳頁沒有名單，只有這裡看得到全部應收總表。</p></header>
 <main>
 <section id="lockSec"><h2>🔑 後台密碼</h2><div id="lockBody"></div>
 <p class="small">提醒：這是存在你這支手機／電腦上的簡易鎖，用來擋住隨手點開的人，不是銀行等級的帳號密碼。真正保密要靠：不要把這個連結公開貼出，不要把解鎖後的手機借給別人。</p>
-<p class="small">版本：2026-10-31 v1.1（大項／項次／日期／客戶／應收帳款清單＋詳細＋應收／已收／結案＋收款方式／日期／收款人；日期顯示與月份篩選修正）</p></section>
+<p class="small">版本：2026-10-31 v2（一列一張報價單，金額是含稅總計；點詳細才展開每一筆採購項目；狀態以整張報價單為單位，含應收／已收／結案＋收款方式／日期／收款人）</p></section>
 <div id="adminBody" style="display:none">
 <section>
 <h2>💰 應收總覽</h2>
 <div class="stats"><div class="stat">應收未收<b id="sumAR">—</b></div><div class="stat">已收<b id="sumPaid">—</b></div><div class="stat">結案<b id="sumClosed">—</b></div></div>
 <p class="small" id="dbNote">正在準備載入…</p>
 <p class="small" id="count"></p>
-<label for="qText">🔍 關鍵字（客戶／報價單號／大項）</label>
-<input id="qText" type="text" placeholder="例如：卓廣珣、Q2026、主機（可不填）">
+<label for="qText">🔍 關鍵字（客戶／報價單號）</label>
+<input id="qText" type="text" placeholder="例如：卓廣珣、Q2026（可不填）">
 <div class="row"><div><label for="qStatus">狀態篩選</label><select id="qStatus"><option value="">全部狀態</option><option value="應收">應收</option><option value="已收">已收</option><option value="結案">結案</option></select></div>
 <div><label for="qMonth">月份篩選</label><input id="qMonth" type="month"></div></div>
 <button class="primary" id="btnAll">看全部</button>
 <button class="ghost" id="btnReload">🔄 從資料庫重新載入</button>
-<button class="ghost" id="btnExport">⬇️ 匯出目前看到的結果 CSV</button>
+<button class="ghost" id="btnExport">⬇️ 匯出目前看到的報價單總表 CSV</button>
 <button class="ghost" id="lockBtn">🔒 鎖定後台</button>
 <button class="ghost" id="changePinBtn">🔑 換一個後台密碼</button>
 </section>
-<section><h2>📋 明細（點「詳細」才會看到報價單內容）</h2><div id="list"></div></section>
+<section><h2>📋 報價單總表（一列一張報價單，點「詳細」才看採購項目）</h2><div id="list"></div></section>
 </div>
 </main>
 <script src="config.js?v=20261031"></script>
@@ -62,46 +63,47 @@ const $=id=>document.getElementById(id);
 const API=(typeof HONGYI_API!=="undefined"&&HONGYI_API.url)?HONGYI_API.url:"";
 const TOKEN=(typeof HONGYI_API!=="undefined"&&HONGYI_API.token)?HONGYI_API.token:"";
 const PINKEY="hongyi-admin-pin-v1";
-let allRows=[], openRow=null;
+let allQuotes=[], itemsByQuote={}, openQuote=null;
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function fmt(n){return "NT$ "+Number(n||0).toLocaleString("zh-Hant-TW")}
+function todayStr(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
 function normDate(s){ const v=String(s||"").trim(); if(!v) return ""; const m=v.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/); if(m) return m[1]+"/"+m[2].padStart(2,"0")+"/"+m[3].padStart(2,"0"); const d=new Date(v); if(!isNaN(d)) return d.getFullYear()+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+String(d.getDate()).padStart(2,"0"); return v; }
 function inputDate(s){ const n=normDate(s); return n? n.replace(/\//g,"-") : ""; }
-function todayStr(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
 function badge(s){return s==="已收"?'<span class="badge paid">已收</span>':s==="結案"?'<span class="badge closed">結案</span>':'<span class="badge ar">應收</span>';}
 function filtered(){
   const q=($("qText").value||"").trim(), st=$("qStatus").value, mo=$("qMonth").value;
-  return allRows.filter(r=>{
+  return allQuotes.filter(r=>{
     if(st&&r.status!==st) return false;
     if(mo&&!(normDate(r.date).startsWith(mo.replace("-","/")))) return false;
-    if(q&&!(r.client+r.quoteNo+r.major).includes(q)) return false;
+    if(q&&!(r.client+r.quoteNo).includes(q)) return false;
     return true;
   });
 }
 function render(){
   const list=filtered();
-  const sum=s=>list.reduce((a,r)=>a+(r.status===s?Number(r.amount||0):0),0);
-  // 總覽用全部資料算，不是只算篩選後，避免篩選後總額被誤會
-  const sumAll=s=>allRows.reduce((a,r)=>a+(r.status===s?Number(r.amount||0):0),0);
+  const sumAll=s=>allQuotes.reduce((a,r)=>a+(r.status===s?Number(r.total||0):0),0);
   $("sumAR").textContent=fmt(sumAll("應收")); $("sumPaid").textContent=fmt(sumAll("已收")); $("sumClosed").textContent=fmt(sumAll("結案"));
-  $("count").textContent=`全部 ${allRows.length} 筆，目前看到 ${list.length} 筆。總覽金額是全部資料的合計。`;
+  $("count").textContent=`全部 ${allQuotes.length} 張報價單，目前看到 ${list.length} 張。總覽金額是全部資料的合計，以含稅總計計算。`;
   $("list").innerHTML=list.length?list.map(r=>{
-    const isOpen=openRow===r.row;
-    return `<div class="item"><b>${esc(r.major)}</b> ・ 項次 ${esc(r.seq)} ${badge(r.status)}<br>
-    <span class="small">${esc(normDate(r.date))} ・ 客戶：${esc(r.client)} ・ 報價單 ${esc(r.quoteNo)}</span><br>
-    <span class="num">${fmt(r.amount)}</span> <span class="small">（報價總額 ${fmt(r.total)}）</span>
+    const isOpen=openQuote===r.quoteNo;
+    const items=itemsByQuote[r.quoteNo]||[];
+    return `<div class="item"><b>${esc(r.quoteNo)}</b> ${badge(r.status)}<br>
+    <span class="small">${esc(normDate(r.date))} ・ 客戶：${esc(r.client)} ・ 品項 ${esc(r.itemCount)} 筆</span><br>
+    <span class="num">${fmt(r.total)}</span> <span class="small">（小計 ${fmt(r.subtotal)}${r.tax?` ＋ 稅金 ${fmt(r.tax)}`:""}）</span>
     ${r.status==="已收"?`<br><span class="small">✅ 收款：${esc(r.payMethod)}${r.payNote?`（${esc(r.payNote)}）`:""} ・ ${esc(normDate(r.payDate))} ・ 收款人 ${esc(r.payee)}</span>`:""}
-    <div class="actions"><button class="ghost" onclick="toggleDetail(${r.row})">${isOpen?"收起詳細":"📄 詳細"}</button><button class="ghost" onclick="delRow(${r.row})">刪除這筆</button></div>
-    ${isOpen?detailHtml(r):""}</div>`;
+    <div class="actions"><button class="ghost" onclick="toggleDetail('${esc(r.quoteNo)}')">${isOpen?"收起詳細":"📄 詳細（看採購項目）"}</button><button class="ghost" onclick="delQuote('${esc(r.quoteNo)}')">刪除整張</button></div>
+    ${isOpen?detailHtml(r,items):""}</div>`;
   }).join(""):"<p>這個查詢條件目前沒有紀錄。</p>";
 }
-function detailHtml(r){
+function detailHtml(r,items){
+  const itemsHtml=items.length?items.map(x=>`<div class="qitem"><b>${esc(x.major)}</b> ・ 項次 ${esc(x.seq)}<br><span class="desc">${esc(x.desc)}</span><br>單價 ${fmt(x.price)} × ${esc(x.qty)} ＝ <b>${fmt(x.amount)}</b></div>`).join(""):"<p>這張報價單目前沒有明細項目。</p>";
   return `<div class="detail">
   <b>報價單詳細</b><br>
-  <span class="small">報價單號 ${esc(r.quoteNo)} ・ 大項 ${esc(r.major)} ・ 項次 ${esc(r.seq)} ・ 日期 ${esc(normDate(r.date))} ・ 客戶 ${esc(r.client)}</span><br>
-  <span class="desc">${esc(r.desc)}</span><br>
-  單價 ${fmt(r.price)} × ${esc(r.qty)} ＝ <b>${fmt(r.amount)}</b>　報價總額 ${fmt(r.total)}<br><br>
-  <label>狀態</label>
+  <span class="small">報價單號 ${esc(r.quoteNo)} ・ 日期 ${esc(normDate(r.date))} ・ 客戶 ${esc(r.client)} ・ 來源檔 ${esc(r.source)}</span><br>
+  小計 ${fmt(r.subtotal)} ＋ 稅金 ${fmt(r.tax)} ＝ 應收帳款（**含稅總計**） <b>${fmt(r.total)}</b><br><br>
+  <b>採購項目（共 ${items.length} 筆）</b>
+  ${itemsHtml}<br>
+  <label>狀態（整張報價單一起改）</label>
   <select id="st-${r.row}" onchange="document.getElementById('pay-${r.row}').style.display=this.value==='已收'?'block':'none'"><option value="應收" ${r.status==="應收"?"selected":""}>應收</option><option value="已收" ${r.status==="已收"?"selected":""}>已收</option><option value="結案" ${r.status==="結案"?"selected":""}>結案</option></select>
   <div id="pay-${r.row}" style="display:${r.status==="已收"?"block":"none"}">
   <label>收款方式</label>
@@ -112,17 +114,15 @@ function detailHtml(r){
   <div><label>收款人</label><input id="pe-${r.row}" type="text" value="${esc(r.payee)}" placeholder="誰收的款"></div></div>
   </div>
   <p class="small" id="saveMsg-${r.row}"></p>
-  <button class="primary" onclick="saveStatus(${r.row})">💾 儲存這一筆的狀態</button>
-  <button class="ghost" onclick="saveStatusQuote('${esc(r.quoteNo)}',${r.row})">💾 整張報價單（${esc(r.quoteNo)}）一起改成上面狀態</button>
-  <button class="danger" onclick="delQuote('${esc(r.quoteNo)}')">🗑️ 刪除整張報價單（${esc(r.quoteNo)} 全部品項）</button>
-  <p class="small">提醒：改回「應收」會清空收款方式／日期／收款人；改成「結案」會保留已填的收款資料。整張一起改時，收款資料會套用到同一張報價單的每一筆。</p>
+  <button class="primary" onclick="saveStatus(${r.row})">💾 儲存這張報價單的狀態</button>
+  <button class="ghost" onclick="exportItems('${esc(r.quoteNo)}')">⬇️ 匯出這張的採購項目 CSV</button>
+  <button class="danger" onclick="delQuote('${esc(r.quoteNo)}')">🗑️ 刪除整張報價單（總表＋全部採購項目）</button>
+  <p class="small">提醒：改回「應收」會清空收款方式／日期／收款人；改成「結案」會保留已填的收款資料。狀態是以整張報價單為單位，不再分品項改。</p>
   </div>`;
 }
-window.toggleDetail=row=>{ openRow=(openRow===row?null:row); render(); };
-window.delRow=row=>{ if(!confirm("確定要從資料庫刪除這筆嗎？刪除後無法復原，建議先匯出備份。"))return;
-  fetch(API+"?action=delete&token="+encodeURIComponent(TOKEN)+"&row="+row).then(()=>{allRows=allRows.filter(x=>x.row!==row); if(openRow===row) openRow=null; render();}).catch(()=>alert("刪除失敗，請直接到試算表刪除該列。")); };
-window.delQuote=q=>{ if(!confirm(`確定要刪除整張報價單 ${q} 的全部品項嗎？刪除後無法復原，建議先匯出備份。`))return;
-  fetch(API+"?action=deleteQuote&token="+encodeURIComponent(TOKEN)+"&quoteNo="+encodeURIComponent(q)).then(()=>{allRows=allRows.filter(x=>x.quoteNo!==q); openRow=null; render();}).catch(()=>alert("刪除失敗，請直接到試算表刪除。")); };
+window.toggleDetail=q=>{ openQuote=(openQuote===q?null:q); render(); };
+window.delQuote=q=>{ if(!confirm(`確定要刪除整張報價單 ${q} 嗎？總表和全部採購項目都會刪掉，刪除後無法復原，建議先匯出備份。`))return;
+  fetch(API+"?action=deleteQuote&token="+encodeURIComponent(TOKEN)+"&quoteNo="+encodeURIComponent(q)).then(()=>{allQuotes=allQuotes.filter(x=>x.quoteNo!==q); delete itemsByQuote[q]; if(openQuote===q) openQuote=null; render();}).catch(()=>alert("刪除失敗，請直接到試算表刪除。")); };
 function collectPay(row){
   const st=$("st-"+row).value;
   if(st!=="已收") return { status: st, payMethod:"", payDate:"", payee:"", payNote:"" };
@@ -134,18 +134,18 @@ window.saveStatus=row=>{
   const p=collectPay(row); if(!p) return;
   const q=`action=setStatus&token=${encodeURIComponent(TOKEN)}&row=${row}&status=${encodeURIComponent(p.status)}&payMethod=${encodeURIComponent(p.payMethod)}&payDate=${encodeURIComponent(p.payDate)}&payee=${encodeURIComponent(p.payee)}&payNote=${encodeURIComponent(p.payNote)}`;
   fetch(API+"?"+q).then(r=>r.json()).then(j=>{ if(!j.ok) throw 0;
-    const r=allRows.find(x=>x.row===row); if(r){ r.status=p.status; r.payMethod=p.payMethod; r.payDate=p.payDate; r.payee=p.payee; r.payNote=p.payNote; }
+    const r=allQuotes.find(x=>x.row===row); if(r){ r.status=p.status; r.payMethod=p.payMethod; r.payDate=p.payDate; r.payee=p.payee; r.payNote=p.payNote; }
     $("saveMsg-"+row).textContent="✅ 已儲存。"; render(); })
   .catch(()=>{ $("saveMsg-"+row).textContent="❌ 儲存失敗，請直接到試算表改該列的狀態欄。"; });
 };
-window.saveStatusQuote=(q,row)=>{
-  const p=collectPay(row); if(!p) return;
-  if(!confirm(`確定要把報價單 ${q} 的全部品項都改成「${p.status}」嗎？`)) return;
-  const qs=`action=setStatusQuote&token=${encodeURIComponent(TOKEN)}&quoteNo=${encodeURIComponent(q)}&status=${encodeURIComponent(p.status)}&payMethod=${encodeURIComponent(p.payMethod)}&payDate=${encodeURIComponent(p.payDate)}&payee=${encodeURIComponent(p.payee)}&payNote=${encodeURIComponent(p.payNote)}`;
-  fetch(API+"?"+qs).then(r=>r.json()).then(j=>{ if(!j.ok) throw 0;
-    allRows.forEach(x=>{ if(x.quoteNo===q){ x.status=p.status; x.payMethod=p.payMethod; x.payDate=p.payDate; x.payee=p.payee; x.payNote=p.payNote; } });
-    $("saveMsg-"+row).textContent=`✅ 整張報價單已改成「${p.status}」（${j.updated} 筆）。`; render(); })
-  .catch(()=>{ $("saveMsg-"+row).textContent="❌ 儲存失敗，請直接到試算表改。"; });
+window.exportItems=q=>{
+  const items=itemsByQuote[q]||[];
+  if(!items.length){alert("這張報價單目前沒有明細項目。");return;}
+  const rows=[["報價單號","項次","大項","描述","單價","數量","小計"]];
+  items.forEach(x=>rows.push([q,x.seq,x.major,x.desc,x.price,x.qty,x.amount]));
+  const csv="\ufeff"+rows.map(x=>x.map(c=>`"${String(c??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  a.download="報價單明細-"+q+".csv";a.click();URL.revokeObjectURL(a.href);
 };
 $("btnAll").onclick=()=>{ $("qText").value=""; $("qStatus").value=""; $("qMonth").value=""; render(); };
 $("qText").addEventListener("input",render); $("qStatus").addEventListener("change",render); $("qMonth").addEventListener("change",render);
@@ -153,16 +153,16 @@ $("btnReload").onclick=loadDb;
 $("btnExport").onclick=()=>{
   const list=filtered();
   if(!list.length){alert("目前沒有可以匯出的紀錄。");return;}
-  const rows=[["報價單號","大項","項次","日期","客戶","描述","單價","數量","應收帳款","報價總額","狀態","收款方式","收款日期","收款人","收款備註","來源檔名"]];
-  list.forEach(r=>rows.push([r.quoteNo,r.major,r.seq,normDate(r.date),r.client,r.desc,r.price,r.qty,r.amount,r.total,r.status,r.payMethod,normDate(r.payDate),r.payee,r.payNote,r.source]));
+  const rows=[["報價單號","日期","客戶","品項數","小計","稅金","應收帳款","狀態","收款方式","收款日期","收款人","收款備註","來源檔名"]];
+  list.forEach(r=>rows.push([r.quoteNo,normDate(r.date),r.client,r.itemCount,r.subtotal,r.tax,r.total,r.status,r.payMethod,normDate(r.payDate),r.payee,r.payNote,r.source]));
   const csv="\ufeff"+rows.map(x=>x.map(c=>`"${String(c??"").replace(/"/g,'""')}"`).join(",")).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
-  a.download="宏逸科技應收帳款.csv";a.click();URL.revokeObjectURL(a.href);
+  a.download="宏逸科技應收帳款總表.csv";a.click();URL.revokeObjectURL(a.href);
 };
 function loadDb(){
   if(!API){$("dbNote").textContent="設定檔還沒填資料庫網址：請等部署完成、config.js 更新後，關掉分頁重開後台一次。";return;}
   $("dbNote").textContent="正在從資料庫載入…";
-  fetch(API+"?action=list&token="+encodeURIComponent(TOKEN)).then(r=>r.json()).then(j=>{if(!j.ok)throw 0;allRows=j.rows;$("dbNote").textContent="✅ 已載入 "+allRows.length+" 筆。";render();})
+  fetch(API+"?action=list&token="+encodeURIComponent(TOKEN)).then(r=>r.json()).then(j=>{if(!j.ok)throw 0;allQuotes=j.quotes||[];itemsByQuote={};(j.items||[]).forEach(x=>{(itemsByQuote[x.quoteNo]=itemsByQuote[x.quoteNo]||[]).push(x);});$("dbNote").textContent="✅ 已載入 "+allQuotes.length+" 張報價單。";render();})
   .catch(()=>{$("dbNote").textContent="⚠️ 載入失敗（可能是試算表尚未部署或網路問題），請直接打開試算表確認，裡面的資料就是後台資料。";});
 }
 function unlock(){sessionStorage.setItem("hongyi-admin-unlocked","1");$("lockSec").style.display="none";$("adminBody").style.display="block";loadDb();}
