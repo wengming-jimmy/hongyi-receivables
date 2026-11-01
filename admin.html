@@ -14,7 +14,7 @@ main{max-width:760px;margin:0 auto;padding:16px 14px 48px}
 section{background:#fff;border-radius:18px;padding:20px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
 h2{font-size:20px;margin:0 0 6px} p.lead{color:#475569;line-height:1.65;margin:0 0 12px}
 label{display:block;font-weight:800;margin:14px 0 6px}
-input[type=text],input[type=date],input[type=password],select{width:100%;padding:13px;border:2px solid #cbd5e1;border-radius:12px;font-size:16px;background:#fff}
+input[type=text],input[type=date],input[type=password],input[type=number],select{width:100%;padding:13px;border:2px solid #cbd5e1;border-radius:12px;font-size:16px;background:#fff}
 button{width:100%;padding:13px;border:0;border-radius:14px;font-size:16px;font-weight:900;cursor:pointer}
 .primary{background:#1e3a8a;color:#fff;margin-top:12px} .ghost{background:#e0e7ff;color:#1e3a8a;margin-top:10px} .danger{background:#fff0f0;color:#b00000;margin-top:10px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -37,7 +37,7 @@ button{width:100%;padding:13px;border:0;border-radius:14px;font-size:16px;font-w
 <main>
 <section id="lockSec"><h2>🔑 後台密碼</h2><div id="lockBody"></div>
 <p class="small">提醒：這是存在你這支手機／電腦上的簡易鎖，用來擋住隨手點開的人，不是銀行等級的帳號密碼。真正保密要靠：不要把這個連結公開貼出，不要把解鎖後的手機借給別人。</p>
-<p class="small">版本：2026-10-31 v2（一列一張報價單，金額是含稅總計；點詳細才展開每一筆採購項目；狀態以整張報價單為單位，含應收／已收／結案＋收款方式／日期／收款人）</p></section>
+<p class="small">版本：2026-11-01 v3（一列一張報價單，金額是含稅總計；點詳細才展開每一筆採購項目；狀態直接在每張卡片上改，不用點詳細；選已收必填收款方式、收款金額、收款日期、收款人）</p></section>
 <div id="adminBody" style="display:none">
 <section>
 <h2>💰 應收總覽</h2>
@@ -54,7 +54,7 @@ button{width:100%;padding:13px;border:0;border-radius:14px;font-size:16px;font-w
 <button class="ghost" id="lockBtn">🔒 鎖定後台</button>
 <button class="ghost" id="changePinBtn">🔑 換一個後台密碼</button>
 </section>
-<section><h2>📋 報價單總表（一列一張報價單，點「詳細」才看採購項目）</h2><div id="list"></div></section>
+<section><h2>📋 報價單總表（一列一張報價單，狀態直接在卡片上改；點「詳細」才看採購項目）</h2><div id="list"></div></section>
 </div>
 </main>
 <script src="config.js?v=20261031"></script>
@@ -90,7 +90,8 @@ function render(){
     return `<div class="item"><b>${esc(r.quoteNo)}</b> ${badge(r.status)}<br>
     <span class="small">${esc(normDate(r.date))} ・ 客戶：${esc(r.client)} ・ 品項 ${esc(r.itemCount)} 筆</span><br>
     <span class="num">${fmt(r.total)}</span> <span class="small">（小計 ${fmt(r.subtotal)}${r.tax?` ＋ 稅金 ${fmt(r.tax)}`:""}）</span>
-    ${r.status==="已收"?`<br><span class="small">✅ 收款：${esc(r.payMethod)}${r.payNote?`（${esc(r.payNote)}）`:""} ・ ${esc(normDate(r.payDate))} ・ 收款人 ${esc(r.payee)}</span>`:""}
+    ${r.status==="已收"?`<br><span class="small">✅ 收款：${esc(r.payMethod)}${r.payAmount?` ・ 金額 ${fmt(r.payAmount)}`:""}${r.payNote?`（${esc(r.payNote)}）`:""} ・ ${esc(normDate(r.payDate))} ・ 收款人 ${esc(r.payee)}</span>`:""}
+    ${statusEditorHtml(r)}
     <div class="actions"><button class="ghost" onclick="toggleDetail('${esc(r.quoteNo)}')">${isOpen?"收起詳細":"📄 詳細（看採購項目）"}</button><button class="ghost" onclick="delQuote('${esc(r.quoteNo)}')">刪除整張</button></div>
     ${isOpen?detailHtml(r,items):""}</div>`;
   }).join(""):"<p>這個查詢條件目前沒有紀錄。</p>";
@@ -98,43 +99,55 @@ function render(){
 function detailHtml(r,items){
   const itemsHtml=items.length?items.map(x=>`<div class="qitem"><b>${esc(x.major)}</b> ・ 項次 ${esc(x.seq)}<br><span class="desc">${esc(x.desc)}</span><br>單價 ${fmt(x.price)} × ${esc(x.qty)} ＝ <b>${fmt(x.amount)}</b></div>`).join(""):"<p>這張報價單目前沒有明細項目。</p>";
   return `<div class="detail">
-  <b>報價單詳細</b><br>
+  <b>報價單詳細（採購項目）</b><br>
   <span class="small">報價單號 ${esc(r.quoteNo)} ・ 日期 ${esc(normDate(r.date))} ・ 客戶 ${esc(r.client)} ・ 來源檔 ${esc(r.source)}</span><br>
-  小計 ${fmt(r.subtotal)} ＋ 稅金 ${fmt(r.tax)} ＝ 應收帳款（**含稅總計**） <b>${fmt(r.total)}</b><br><br>
+  小計 ${fmt(r.subtotal)} ＋ 稅金 ${fmt(r.tax)} ＝ 應收帳款（含稅總計） <b>${fmt(r.total)}</b><br><br>
   <b>採購項目（共 ${items.length} 筆）</b>
   ${itemsHtml}<br>
-  <label>狀態（整張報價單一起改）</label>
-  <select id="st-${r.row}" onchange="document.getElementById('pay-${r.row}').style.display=this.value==='已收'?'block':'none'"><option value="應收" ${r.status==="應收"?"selected":""}>應收</option><option value="已收" ${r.status==="已收"?"selected":""}>已收</option><option value="結案" ${r.status==="結案"?"selected":""}>結案</option></select>
+  <button class="ghost" onclick="exportItems('${esc(r.quoteNo)}')">⬇️ 匯出這張的採購項目 CSV</button>
+  <p class="small">狀態變更不用在這裡改，請看上面卡片上的「變更狀態」選單，直接在卡片上改。</p>
+  </div>`;
+}
+function statusEditorHtml(r){
+  const amt = r.payAmount ? r.payAmount : r.total;
+  return `<div class="detail" style="margin-top:10px">
+  <label>✏️ 變更狀態（直接在這裡改，不用點詳細）</label>
+  <select id="st-${r.row}" onchange="onStatusChange(${r.row})"><option value="應收" ${r.status==="應收"?"selected":""}>應收</option><option value="已收" ${r.status==="已收"?"selected":""}>已收</option><option value="結案" ${r.status==="結案"?"selected":""}>結案</option></select>
   <div id="pay-${r.row}" style="display:${r.status==="已收"?"block":"none"}">
-  <label>收款方式</label>
+  <label>收款方式（已收必填）</label>
   <select id="pm-${r.row}"><option value="" ${!r.payMethod?"selected":""}>請選擇</option><option value="現金" ${r.payMethod==="現金"?"selected":""}>現金</option><option value="匯款" ${r.payMethod==="匯款"?"selected":""}>匯款</option><option value="其他" ${r.payMethod==="其他"?"selected":""}>其他</option></select>
+  <label>收款金額（已收必填，預設就是這張的含稅總計，可以改）</label>
+  <input id="pa-${r.row}" type="number" inputmode="decimal" step="any" value="${esc(amt)}" placeholder="例如：20489.7">
   <label>其他方式說明（選「其他」時填，沒有就空著）</label>
   <input id="pn-${r.row}" type="text" value="${esc(r.payNote)}" placeholder="例如：支票、LINE Pay">
   <div class="row"><div><label>收款日期</label><input id="pd-${r.row}" type="date" value="${esc(inputDate(r.payDate)||todayStr())}"></div>
-  <div><label>收款人</label><input id="pe-${r.row}" type="text" value="${esc(r.payee)}" placeholder="誰收的款"></div></div>
+  <div><label>收款人（已收必填）</label><input id="pe-${r.row}" type="text" value="${esc(r.payee)}" placeholder="誰收的款"></div></div>
   </div>
   <p class="small" id="saveMsg-${r.row}"></p>
   <button class="primary" onclick="saveStatus(${r.row})">💾 儲存這張報價單的狀態</button>
-  <button class="ghost" onclick="exportItems('${esc(r.quoteNo)}')">⬇️ 匯出這張的採購項目 CSV</button>
-  <button class="danger" onclick="delQuote('${esc(r.quoteNo)}')">🗑️ 刪除整張報價單（總表＋全部採購項目）</button>
-  <p class="small">提醒：改回「應收」會清空收款方式／日期／收款人；改成「結案」會保留已填的收款資料。狀態是以整張報價單為單位，不再分品項改。</p>
+  <p class="small">選「已收」才會出現收款欄位；改回「應收」會清空收款方式／金額／日期／收款人；改成「結案」會保留已填的收款資料。狀態是以整張報價單為單位。</p>
   </div>`;
 }
+window.onStatusChange=row=>{ const el=$("pay-"+row); if(el) el.style.display=$("st-"+row).value==="已收"?"block":"none"; };
 window.toggleDetail=q=>{ openQuote=(openQuote===q?null:q); render(); };
 window.delQuote=q=>{ if(!confirm(`確定要刪除整張報價單 ${q} 嗎？總表和全部採購項目都會刪掉，刪除後無法復原，建議先匯出備份。`))return;
   fetch(API+"?action=deleteQuote&token="+encodeURIComponent(TOKEN)+"&quoteNo="+encodeURIComponent(q)).then(()=>{allQuotes=allQuotes.filter(x=>x.quoteNo!==q); delete itemsByQuote[q]; if(openQuote===q) openQuote=null; render();}).catch(()=>alert("刪除失敗，請直接到試算表刪除。")); };
 function collectPay(row){
   const st=$("st-"+row).value;
-  if(st!=="已收") return { status: st, payMethod:"", payDate:"", payee:"", payNote:"" };
+  if(st!=="已收") return { status: st, payMethod:"", payDate:"", payee:"", payNote:"", payAmount:"" };
   const pm=$("pm-"+row).value;
   if(!pm){ alert("狀態選「已收」時，一定要選收款方式（現金／匯款／其他）。"); return null; }
-  return { status: st, payMethod: pm, payDate: $("pd-"+row).value||todayStr(), payee: $("pe-"+row).value.trim(), payNote: $("pn-"+row).value.trim() };
+  const pa=Number($("pa-"+row).value);
+  if(!pa||pa<=0){ alert("狀態選「已收」時，一定要填收款金額，而且要大於 0。"); return null; }
+  const pe=$("pe-"+row).value.trim();
+  if(!pe){ alert("狀態選「已收」時，一定要填收款人。"); return null; }
+  return { status: st, payMethod: pm, payDate: $("pd-"+row).value||todayStr(), payee: pe, payNote: $("pn-"+row).value.trim(), payAmount: pa };
 }
 window.saveStatus=row=>{
   const p=collectPay(row); if(!p) return;
-  const q=`action=setStatus&token=${encodeURIComponent(TOKEN)}&row=${row}&status=${encodeURIComponent(p.status)}&payMethod=${encodeURIComponent(p.payMethod)}&payDate=${encodeURIComponent(p.payDate)}&payee=${encodeURIComponent(p.payee)}&payNote=${encodeURIComponent(p.payNote)}`;
+  const q=`action=setStatus&token=${encodeURIComponent(TOKEN)}&row=${row}&status=${encodeURIComponent(p.status)}&payMethod=${encodeURIComponent(p.payMethod)}&payDate=${encodeURIComponent(p.payDate)}&payee=${encodeURIComponent(p.payee)}&payNote=${encodeURIComponent(p.payNote)}&payAmount=${encodeURIComponent(p.payAmount)}`;
   fetch(API+"?"+q).then(r=>r.json()).then(j=>{ if(!j.ok) throw 0;
-    const r=allQuotes.find(x=>x.row===row); if(r){ r.status=p.status; r.payMethod=p.payMethod; r.payDate=p.payDate; r.payee=p.payee; r.payNote=p.payNote; }
+    const r=allQuotes.find(x=>x.row===row); if(r){ r.status=p.status; r.payMethod=p.payMethod; r.payDate=p.payDate; r.payee=p.payee; r.payNote=p.payNote; r.payAmount=p.payAmount; }
     $("saveMsg-"+row).textContent="✅ 已儲存。"; render(); })
   .catch(()=>{ $("saveMsg-"+row).textContent="❌ 儲存失敗，請直接到試算表改該列的狀態欄。"; });
 };
@@ -153,8 +166,8 @@ $("btnReload").onclick=loadDb;
 $("btnExport").onclick=()=>{
   const list=filtered();
   if(!list.length){alert("目前沒有可以匯出的紀錄。");return;}
-  const rows=[["報價單號","日期","客戶","品項數","小計","稅金","應收帳款","狀態","收款方式","收款日期","收款人","收款備註","來源檔名"]];
-  list.forEach(r=>rows.push([r.quoteNo,normDate(r.date),r.client,r.itemCount,r.subtotal,r.tax,r.total,r.status,r.payMethod,normDate(r.payDate),r.payee,r.payNote,r.source]));
+  const rows=[["報價單號","日期","客戶","品項數","小計","稅金","應收帳款","狀態","收款方式","收款金額","收款日期","收款人","收款備註","來源檔名"]];
+  list.forEach(r=>rows.push([r.quoteNo,normDate(r.date),r.client,r.itemCount,r.subtotal,r.tax,r.total,r.status,r.payMethod,r.payAmount||"",normDate(r.payDate),r.payee,r.payNote,r.source]));
   const csv="\ufeff"+rows.map(x=>x.map(c=>`"${String(c??"").replace(/"/g,'""')}"`).join(",")).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
   a.download="宏逸科技應收帳款總表.csv";a.click();URL.revokeObjectURL(a.href);
